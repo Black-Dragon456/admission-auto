@@ -1,22 +1,34 @@
 import base64
+import time
+
 import ddddocr
+
 
 ocr = ddddocr.DdddOcr(show_ad=False)
 
 
-def get_code(page):
+def get_code(session):
     """
-    获取验证码
+    获取验证码并OCR识别
     """
 
-    src = page.locator(".img-verifycode").get_attribute("src")
+    url = f"https://jxcf.jxeea.cn/captcha/getcode?t={int(time.time() * 1000)}"
 
-    base64_str = src.split(",")[1]
+    response = session.get(url, timeout=10)
 
-    img = base64.b64decode(base64_str)
+    response.raise_for_status()
 
-    code = ocr.classification(img)
+    data = response.json()
 
-    print("验证码：", code)
+    if data.get("Code") != 1:
+        raise RuntimeError("获取验证码失败")
+
+    img_base64 = data["Data"]["Img"]
+
+    image = base64.b64decode(img_base64)
+
+    code = ocr.classification(image).strip()
+
+    print(f"验证码：{code}")
 
     return code

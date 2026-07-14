@@ -1,201 +1,144 @@
+import json
 import os
 from datetime import datetime
 
-from playwright.sync_api import sync_playwright
+import requests
+from lzstring import LZString
 
 import captcha
 import config
+import parser
+
+lz = LZString()
 
 
-def write_log(message):
+def compress(text: str) -> str:
+    """
+    与网页 LZString.compressToBase64() 保持一致
+    """
+    return lz.compressToBase64(text)
+
+
+def write_query_log(message: str):
+    """
+    写查询日志
+    """
+    os.makedirs(config.LOGS_DIR, exist_ok=True)
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    print(f"[{now}] {message}")
+    with open(
+            os.path.join(config.LOGS_DIR, "query.log"),
+            "a",
+            encoding="utf-8"
+    ) as f:
+        f.write(f"[{now}] {message}\n")
+
+def write_result_log(result: dict):
+    """
+    写查询结果日志
+    """
+    os.makedirs(config.LOGS_DIR, exist_ok=True)
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
     with open(
             os.path.join(config.LOGS_DIR, "result.log"),
             "a",
             encoding="utf-8"
     ) as f:
-        f.write(f"[{now}] {message}\n")
+        f.write(f"[{now}] {json.dumps(result, ensure_ascii=False, indent=4)}")
+        f.write("\n")
 
 
-def save_screenshot(page):
-    filename = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-    path = os.path.join(config.SCREENSHOT_DIR, f"{filename}.png")
-
-    # 截取查询结果区域
-    result_area = page.locator(".cen-form")
-
-    result_area.screenshot(path=path)
-
-    print(f"截图保存：{path}")
-
-
-def parse_result(page):
+def create_session() -> requests.Session:
     """
-    根据tab激活状态判断结果
-    enresult1 = 有录取
-    enresult2 = 暂无录取
+    创建Session
     """
+    session = requests.Session()
 
-    # 有录取信息
-    if page.locator("#enresult1.tab-pane.active").count() == 0:
-        result = {
-            "考生状态": page.locator("#enresult1 .lqzt").inner_text().strip(),
-            "院校代号": page.locator("#enresult1 .yxdh").inner_text().strip(),
-            "院校名称": page.locator("#enresult1 .yxmc").inner_text().strip(),
-            "专业组名称": page.locator("#enresult1 .zyzmc").inner_text().strip(),
-            "专业代号": page.locator("#enresult1 .zydh").inner_text().strip(),
-            "专业名称": page.locator("#enresult1 .zymc").inner_text().strip(),
-            "批次名称": page.locator("#enresult1 .pcmc").inner_text().strip(),
-            "科类名称": page.locator("#enresult1 .klmc").inner_text().strip(),
-            "计划性质": page.locator("#enresult1 .jhxzmc").inner_text().strip(),
-        }
+    session.headers.update({
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/150.0.0.0 Safari/537.36"
+        ),
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Referer": config.URL + "/",
+        "Origin": config.URL,
+    })
 
-        return {
-            "success": True,
-            "admitted": True,
-            "data": result
-        }
-
-    # 暂无录取
-    if page.locator("#enresult2.tab-pane.active").count() > 0:
-        return {
-            "success": True,
-            "admitted": False,
-            "message": "暂无录取信息"
-        }
-
-    return None
-
-
-def refresh_captcha(page):
-    """
-    刷新验证码
-    """
-
-    ok_btn = page.locator("div.gbtips")
-
-    if ok_btn.count() > 0 and ok_btn.is_visible():
-        ok_btn.click()
-        page.wait_for_timeout(500)
-
-    page.locator(".img-verifycode").click()
-
-    page.wait_for_timeout(1500)
+    return session
 
 
 def query():
-    os.makedirs(config.SCREENSHOT_DIR, exist_ok=True)
-    os.makedirs(config.LOGS_DIR, exist_ok=True)
+    """
+    查询录取结果
+    """
 
-    launch_args = {
-        "headless": config.HEADLESS
-    }
+    session = create_session()
 
-    if config.BROWSER_PATH:
-        launch_args["executable_path"] = config.BROWSER_PATH
+    # 先访问首页，建立Cookie
+    home = session.get(config.URL, timeout=10)
+    home.raise_for_status()
 
-    with sync_playwright() as p:
 
-        browser = p.chromium.launch(**launch_args)
+    # OCR 最多识别5次
+    for i in range(5):
 
-        page = browser.new_page()
+        try:
 
-        page.goto(config.URL)
-
-        page.wait_for_load_state("networkidle")
-
-        # 输入信息
-        page.locator("#key1").fill(config.EXAM_NO)
-
-        page.wait_for_timeout(500)
-
-        page.locator("#key2").fill(config.ID_CARD_LAST4)
-
-        page.wait_for_timeout(500)
-
-        for i in range(5):
-
-            # 输入验证码
-            page.locator("input.code").fill("")
-
-            code = captcha.get_code(page)
+            # 获取验证码
+            code = captcha.get_code(session)
 
             print(f"第{i + 1}次验证码：{code}")
 
-            page.locator("input.code").fill(code)
+            write_query_log(f"第{i + 1}次验证码：{code}")
 
-            # 点击查询
-            page.locator("#btncx").click()
+            form = {
+                "key1": compress(config.EXAM_NO),
+                "key2": compress(config.ID_CARD_LAST4),
+                "key3": compress(code)
+            }
 
-            try:
-                # 等待结果tab出现
-                page.wait_for_selector(
-                    "#enresult1.tab-pane.active,"
-                    "#enresult2.tab-pane.active",
-                    timeout=5000
-                )
-                # 打印当前激活的tab
-                enresult1_active = page.locator("#enresult1.tab-pane.active").count()
-                enresult2_active = page.locator("#enresult2.tab-pane.active").count()
-
-                print("enresult1 active数量：", enresult1_active)
-                print("enresult2 active数量：", enresult2_active)
-
-                # 打印页面结果文字
-                if enresult1_active > 0:
-                    print("检测到：有录取信息")
-                    print(
-                        page.locator("#enresult1").inner_text()
-                    )
-
-                elif enresult2_active > 0:
-                    print("检测到：暂无录取信息")
-                    print(
-                        page.locator("#enresult2").inner_text()
-                    )
-
-            except Exception:
-
-                print("验证码错误")
-
-                refresh_captcha(page)
-
-                continue
-
-            result = parse_result(page)
-
-            if result is None:
-                write_log("未知查询结果")
-
-                browser.close()
-
-                return False
-
-            # 无录取
-            if not result["admitted"]:
-                write_log("暂无录取信息")
-
-                browser.close()
-
-                return result
-
-            # 有录取
-            write_log(
-                f"查询到录取信息：{result['data']}"
+            response = session.post(
+                config.URL,
+                data=form,
+                timeout=10
             )
 
-            save_screenshot(page)
+            response.raise_for_status()
 
-            browser.close()
+            # 调试：保存POST返回页面
+            #with open("post_result.html", "w", encoding="utf-8") as f:
+                #f.write(response.text)
 
+            result = parser.parse(response.text)
+            if not result["success"]:
+                write_query_log(result.get("message", "查询失败"))
+                continue
+            # 查询成功
+            if result["admitted"]:
+                admission = result["admission"]
+
+                write_query_log(
+                    "查询成功：已录取 | "
+                    f"院校：{admission['院校名称']} | "
+                    f"专业：{admission['专业名称']} | "
+                    f"批次：{admission['批次名称']} | "
+                    f"状态：{admission['考生状态']}"
+                )
+            else:
+                write_query_log("查询成功：暂无录取信息")
+            write_result_log(result)
             return result
+        except Exception as e:
 
-        write_log("连续5次验证码失败")
+            write_query_log(f"第{i + 1}次查询异常：{e}")
 
-        browser.close()
+            print(e)
 
-        return False
+    write_query_log("连续5次验证码识别失败")
+
+    return {
+        "success": False,
+        "message": "连续5次验证码识别失败"
+    }
