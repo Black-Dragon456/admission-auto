@@ -41,7 +41,7 @@ def parse_result(page):
     """
 
     # 有录取信息
-    if page.locator("#enresult1.tab-pane.active").count() == 0:
+    if page.locator("#enresult1.tab-pane.active").count() > 0:
         result = {
             "考生状态": page.locator("#enresult1 .lqzt").inner_text().strip(),
             "院校代号": page.locator("#enresult1 .yxdh").inner_text().strip(),
@@ -84,7 +84,7 @@ def refresh_captcha(page):
 
     page.locator(".img-verifycode").click()
 
-    page.wait_for_timeout(1500)
+    page.wait_for_timeout(1000)
 
 
 def query():
@@ -157,6 +157,7 @@ def query():
                     print(
                         page.locator("#enresult2").inner_text()
                     )
+                page.wait_for_timeout(1000)
 
             except Exception:
 
