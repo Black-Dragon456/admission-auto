@@ -2,7 +2,6 @@ import json
 import re
 
 
-
 def _extract_json(html: str, var_name: str):
     """
     提取页面中的 JS 变量
@@ -38,11 +37,59 @@ def _extract_json(html: str, var_name: str):
         return None
 
 
+def _extract_message(html: str) -> str:
+    """
+    提取页面提示信息
+
+    页面示例：
+    var msg = "抱歉，验证码错误，请重新输入！";
+
+    :param html: 页面HTML
+    :return: 提示信息
+    """
+    match = re.search(r'var\s+msg\s*=\s*"([^"]*)"', html)
+
+    if not match:
+        return ""
+
+    return match.group(1).strip()
+
+
 def parse(html: str):
     """
     解析查询结果
     """
+    # =========================
+    # 优先解析页面提示
+    # =========================
 
+    msg = _extract_message(html)
+
+    if msg:
+
+        if "验证码" in msg:
+            return {
+                "success": False,
+                "error": "captcha",
+                "message": msg
+            }
+
+        if "输入信息有误" in msg:
+            return {
+                "success": False,
+                "error": "input",
+                "message": msg
+            }
+
+        return {
+            "success": False,
+            "error": "unknown",
+            "message": msg
+        }
+
+    # =========================
+    # 再解析数据
+    # =========================
     score = _extract_json(html, "_score")
     luqu = _extract_json(html, "_luqu")
 

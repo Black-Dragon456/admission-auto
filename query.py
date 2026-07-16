@@ -33,6 +33,7 @@ def write_query_log(message: str):
     ) as f:
         f.write(f"[{now}] {message}\n")
 
+
 def write_result_log(result: dict):
     """
     写查询结果日志
@@ -80,7 +81,6 @@ def query():
     home = session.get(config.URL, timeout=10)
     home.raise_for_status()
 
-
     # OCR 最多识别5次
     for i in range(5):
 
@@ -109,12 +109,21 @@ def query():
 
             # 调试：保存POST返回页面
             #with open("post_result.html", "w", encoding="utf-8") as f:
-                #f.write(response.text)
+            #    f.write(response.text)
 
             result = parser.parse(response.text)
+            # 查询失败
             if not result["success"]:
+
                 write_query_log(result.get("message", "查询失败"))
-                continue
+
+                # 验证码错误，继续下一次
+                if result.get("error") == "captcha":
+                    continue
+
+                # 输入信息错误、解析错误等，不再重试
+                return result
+
             # 查询成功
             if result["admitted"]:
                 admission = result["admission"]
