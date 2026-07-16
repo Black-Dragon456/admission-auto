@@ -22,7 +22,7 @@ ID_CARD_LAST4 = config.get("system", "id_card_last4")
 
 HEADLESS = config.getboolean("system", "headless")
 
-INTERVAL = config.getint("system", "interval")
+INTERVAL = config.getfloat("system", "interval")
 
 SCREENSHOT_DIR = config.get("system", "screenshot_dir")
 

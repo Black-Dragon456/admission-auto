@@ -14,7 +14,7 @@ def main():
 
         try:
 
-            result = query()
+            result = query(config.EXAM_NO, config.ID_CARD_LAST4)
 
             print(result)
 

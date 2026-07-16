@@ -70,7 +70,7 @@ def create_session() -> requests.Session:
     return session
 
 
-def query():
+def query(exam_no,id_card_last4):
     """
     查询录取结果
     """
@@ -94,8 +94,8 @@ def query():
             write_query_log(f"第{i + 1}次验证码：{code}")
 
             form = {
-                "key1": compress(config.EXAM_NO),
-                "key2": compress(config.ID_CARD_LAST4),
+                "key1": compress(exam_no),
+                "key2": compress(id_card_last4),
                 "key3": compress(code)
             }
 
