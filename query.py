@@ -1,7 +1,7 @@
 import os
 from datetime import datetime
 
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import sync_playwright, TimeoutError
 
 import captcha
 import config
@@ -102,101 +102,120 @@ def query():
 
         browser = p.chromium.launch(**launch_args)
 
-        page = browser.new_page()
+        try:
 
-        page.goto(config.URL)
+            page = browser.new_page()
 
-        page.wait_for_load_state("networkidle")
+            page.goto(config.URL)
 
-        # 输入信息
-        page.locator("#key1").fill(config.EXAM_NO)
+            page.wait_for_load_state("networkidle")
 
-        page.wait_for_timeout(500)
+            # 输入信息
+            page.locator("#key1").fill(config.EXAM_NO)
 
-        page.locator("#key2").fill(config.ID_CARD_LAST4)
+            page.wait_for_timeout(500)
 
-        page.wait_for_timeout(500)
+            page.locator("#key2").fill(config.ID_CARD_LAST4)
 
-        for i in range(5):
+            page.wait_for_timeout(500)
 
-            # 输入验证码
-            page.locator("input.code").fill("")
+            captcha_failed = True
 
-            code = captcha.get_code(page)
+            for i in range(5):
 
-            print(f"第{i + 1}次验证码：{code}")
+                page.locator("input.code").fill("")
 
-            page.locator("input.code").fill(code)
+                code = captcha.get_code(page)
 
-            # 点击查询
-            page.locator("#btncx").click()
+                print(f"第{i + 1}次验证码：{code}")
 
-            try:
-                # 等待结果tab出现
-                page.wait_for_selector(
-                    "#enresult1.tab-pane.active,"
-                    "#enresult2.tab-pane.active",
-                    timeout=5000
+                page.locator("input.code").fill(code)
+
+                page.locator("#btncx").click()
+
+                try:
+
+                    page.wait_for_selector(
+                        "#enresult1.tab-pane.active,"
+                        "#enresult2.tab-pane.active",
+                        timeout=5000
+                    )
+
+                    enresult1_active = page.locator(
+                        "#enresult1.tab-pane.active"
+                    ).count()
+
+                    enresult2_active = page.locator(
+                        "#enresult2.tab-pane.active"
+                    ).count()
+
+                    print("enresult1 active数量：", enresult1_active)
+                    print("enresult2 active数量：", enresult2_active)
+
+                    if enresult1_active:
+                        print("检测到：有录取信息")
+                        print(
+                            page.locator("#enresult1").inner_text()
+                        )
+
+                    elif enresult2_active:
+                        print("检测到：暂无录取信息")
+                        print(
+                            page.locator("#enresult2").inner_text()
+                        )
+
+                    page.wait_for_timeout(1000)
+
+                except TimeoutError:
+
+                    err_msg = page.locator(
+                        "div.tipswz"
+                    ).text_content()
+
+                    if err_msg:
+                        err_msg = err_msg.strip()
+
+                    print(f"错误信息：{err_msg}")
+
+                    # 验证码错误
+                    if err_msg and "验证码" in err_msg:
+                        refresh_captcha(page)
+                        continue
+
+                    # 非验证码错误
+                    captcha_failed = False
+
+                    if err_msg:
+                        write_log(f"查询失败：{err_msg}")
+                    else:
+                        write_log("查询失败：未知错误")
+
+                    break
+                result = parse_result(page)
+
+                if result is None:
+                    write_log("未知查询结果")
+                    return False
+
+                # 暂无录取
+                if not result["admitted"]:
+                    write_log("暂无录取信息")
+                    return result
+
+                # 有录取
+                write_log(
+                    f"查询到录取信息：{result['data']}"
                 )
-                # 打印当前激活的tab
-                enresult1_active = page.locator("#enresult1.tab-pane.active").count()
-                enresult2_active = page.locator("#enresult2.tab-pane.active").count()
 
-                print("enresult1 active数量：", enresult1_active)
-                print("enresult2 active数量：", enresult2_active)
-
-                # 打印页面结果文字
-                if enresult1_active > 0:
-                    print("检测到：有录取信息")
-                    print(
-                        page.locator("#enresult1").inner_text()
-                    )
-
-                elif enresult2_active > 0:
-                    print("检测到：暂无录取信息")
-                    print(
-                        page.locator("#enresult2").inner_text()
-                    )
-                page.wait_for_timeout(1000)
-
-            except Exception:
-
-                print("验证码错误")
-
-                refresh_captcha(page)
-
-                continue
-
-            result = parse_result(page)
-
-            if result is None:
-                write_log("未知查询结果")
-
-                browser.close()
-
-                return False
-
-            # 无录取
-            if not result["admitted"]:
-                write_log("暂无录取信息")
-
-                browser.close()
+                save_screenshot(page)
 
                 return result
 
-            # 有录取
-            write_log(
-                f"查询到录取信息：{result['data']}"
-            )
+            # 连续5次验证码错误
+            if captcha_failed:
+                write_log("连续5次验证码失败")
 
-            save_screenshot(page)
+            return False
 
+        finally:
             browser.close()
-
-            return result
-
-        write_log("连续5次验证码失败")
-
-        browser.close()
-
-        return False
